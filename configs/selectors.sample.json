@@ -1,0 +1,48 @@
+{
+  "base_url": "http://localhost:4190/",
+  "timeout_ms": 45000,
+  "automation": {
+    "slow_mo_ms": 250,
+    "action_delay_ms": 900,
+    "settle_ms": 1200,
+    "presence_check_ms": 5000,
+    "view_confirmation_ms": 7000,
+    "retry_delay_ms": 3000,
+    "max_attempts": 5,
+    "user_data_dir": ".workday-rpa-profile",
+    "safe_mode": false,
+    "screenshot_diff_enabled": true
+  },
+  "login": {
+    "enabled": false
+  },
+  "workflow": {
+    "task_name": "Maintain Permissions for Security Group",
+    "replica_storage_key": "exactWorkdayReplica",
+    "global_search_input": "testid=global-search",
+    "global_search_result": "testid=search-maintain-task",
+    "security_group_input": "testid=source-security-group",
+    "security_group_result": "css=[data-action='choose-source'][data-group='{security_group}']",
+    "ok_button": "testid=prompt-ok",
+    "permissions_grid": "[data-testid='domain-permissions-grid'], [data-testid='view-security-group-grid']",
+    "add_policy_button": "css=[data-action='add-row']",
+    "access_field": "testid=access-token",
+    "access_lookup_input": "testid=access-lookup-input",
+    "access_result": "css=[data-action='choose-access'][data-access='{access}']",
+    "domain_policy_input": "testid=policy-lookup-input",
+    "domain_policy_result": "css=[data-action='choose-policy'][data-policy='{domain_policy}']",
+    "save_button": "testid=submit-permissions",
+    "return_home_button": ["testid=done-view-security-group", "css=[data-action='go-home']"],
+    "spinner_selectors": [
+      "css=[aria-busy='true']",
+      "css=.loading",
+      "css=.spinner",
+      "css=[data-testid='loading']"
+    ],
+    "interruption_buttons": [
+      "role=button[name=\"Continue\"]",
+      "role=button[name=\"Close\"]",
+      "role=button[name=\"Dismiss\"]"
+    ]
+  }
+}

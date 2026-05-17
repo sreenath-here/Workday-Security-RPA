@@ -1,0 +1,22 @@
+{
+  "name": "workday-security-rpa",
+  "version": "0.1.0",
+  "description": "RPA tool for assigning Workday replica domain security policies from Excel request lists.",
+  "private": true,
+  "main": "src/cli.js",
+  "bin": {
+    "workday-security-rpa": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "create-template": "node tools/create-request-template.js",
+    "install:browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "playwright": "^1.45.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
