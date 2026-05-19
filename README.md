@@ -1,6 +1,6 @@
 # Workday Security RPA
 
-Node.js + Playwright RPA for adding domain security policies to a security group from an Excel request list. It is built for your Workday replica first, with selectors kept in JSON so the tool can survive UI text/id changes without code edits.
+Node.js + Playwright RPA for adding domain security policies to a security group from an Excel request list. Initially tested on Workday replica first, with selectors kept in JSON so the tool can survive UI text/id changes without code edits.
 
 ## What It Does
 
