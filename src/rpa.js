@@ -188,6 +188,8 @@ class WorkdaySecurityAutomator {
     const values = this.values(firstRequest);
     const results = [];
     const requestsToAdd = [];
+    const plannedAddKeys = new Set();
+    const duplicateRequestsByAddKey = new Map();
 
     await this.openTask(page, workflow, values);
     await this.fill(page, workflow, 'security_group_input', batch.securityGroup, { required: true, values });
@@ -219,6 +221,14 @@ class WorkdaySecurityAutomator {
         continue;
       }
 
+      const addKey = policyAccessKey(request);
+      if (plannedAddKeys.has(addKey)) {
+        if (!duplicateRequestsByAddKey.has(addKey)) duplicateRequestsByAddKey.set(addKey, []);
+        duplicateRequestsByAddKey.get(addKey).push(request);
+        continue;
+      }
+
+      plannedAddKeys.add(addKey);
       requestsToAdd.push(request);
     }
 
@@ -230,7 +240,6 @@ class WorkdaySecurityAutomator {
     const beforeFingerprint = await this.captureGridFingerprint(page, workflow, firstRequest, 'before-batch-save');
     for (const request of requestsToAdd) {
       await this.addPolicyRow(page, workflow, request);
-      this.addPolicyCacheEntry(batch.securityGroup, request);
     }
 
     await this.click(page, workflow, 'save_button', { required: true, values });
@@ -250,23 +259,44 @@ class WorkdaySecurityAutomator {
     await this.hydratePolicyCache(page, workflow, batch.securityGroup);
 
     for (const request of requestsToAdd) {
+      const addKey = policyAccessKey(request);
+      let result;
       try {
-        const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
+        const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs, { useCache: false });
         if (!verified) {
           throw new RpaError(`Save completed, but ${request.access} / ${request.domainPolicy} was not detected.`);
         }
         await this.verifyReplicaStorageIfConfigured(page, request);
-        results.push({
+        result = {
           request,
           status: 'added',
-          message: `${request.access} added in batch, validated in policy list, and persisted in replica storage.`
-        });
+          message: `${request.access} added in batch and validated in policy list.`
+        };
       } catch (error) {
-        results.push({
+        result = {
           request,
           status: 'failed',
-          message: `Save was submitted, but post-save validation failed: ${error.message}`
-        });
+          message: `Save was submitted, but post-save validation failed: ${error.message}`,
+          screenshotPath: await this.screenshot(page, request)
+        };
+      }
+
+      results.push(result);
+      for (const duplicateRequest of duplicateRequestsByAddKey.get(addKey) || []) {
+        if (result.status === 'added') {
+          results.push({
+            request: duplicateRequest,
+            status: 'already_present',
+            message: 'Same access/policy was already included earlier in this security group batch.'
+          });
+        } else {
+          results.push({
+            request: duplicateRequest,
+            status: 'failed',
+            message: `Duplicate request depends on an earlier batch add that failed validation: ${result.message}`,
+            screenshotPath: result.screenshotPath
+          });
+        }
       }
     }
 
@@ -354,7 +384,7 @@ class WorkdaySecurityAutomator {
       await this.verifySafeModeIfNeeded(page, workflow, request);
       this.addPolicyCacheEntry(request.securityGroup, request);
       await this.confirmOnViewPageThenReturnHome(page, workflow, values);
-      return { request, status: 'added', message: `${request.access} added, validated in policy list, and persisted in replica storage.` };
+      return { request, status: 'added', message: `${request.access} added and validated in policy list.` };
     }
 
     throw new RpaError('Save completed, but the requested policy/access validation was not detected.');
@@ -446,8 +476,9 @@ class WorkdaySecurityAutomator {
     }
   }
 
-  async policyAccessPresent(page, workflow, request, timeoutMs) {
-    if (this.hasPolicyCacheEntry(request.securityGroup, request)) return true;
+  async policyAccessPresent(page, workflow, request, timeoutMs, options = {}) {
+    const useCache = options.useCache ?? true;
+    if (useCache && this.hasPolicyCacheEntry(request.securityGroup, request)) return true;
 
     const values = this.values(request);
     const configuredRow = await this.locator(page, workflow, 'existing_policy_row', {
@@ -481,7 +512,7 @@ class WorkdaySecurityAutomator {
 
   async verifyReplicaStorageIfConfigured(page, request) {
     const storageKey = this.config.workflow.replica_storage_key;
-    if (!storageKey) return;
+    if (!storageKey || !this.shouldVerifyReplicaStorage()) return;
 
     const found = await page.evaluate(
       ({ key, policy, access }) => {
@@ -502,12 +533,30 @@ class WorkdaySecurityAutomator {
     }
   }
 
+  shouldVerifyReplicaStorage() {
+    const workflow = this.config.workflow || {};
+    if (!workflow.replica_storage_key) return false;
+    if (workflow.replica_storage_check === 'always') return true;
+    if (workflow.replica_storage_check === 'never') return false;
+
+    try {
+      const hostname = new URL(this.config.baseUrl).hostname.toLowerCase();
+      return hostname === 'localhost'
+        || hostname === '127.0.0.1'
+        || hostname.endsWith('.localhost')
+        || hostname.includes('wd-replica')
+        || hostname.includes('workday-replica');
+    } catch {
+      return false;
+    }
+  }
+
   async verifySafeModeIfNeeded(page, workflow, request) {
     if (!this.safeMode) return;
     this.logger.info('safe_mode_verify_start', this.logRequest(request));
     this.policyCache.delete(request.securityGroup);
     await this.hydratePolicyCache(page, workflow, request.securityGroup);
-    const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
+    const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs, { useCache: false });
     if (!verified) {
       throw new RpaError(`Safe mode verification failed for ${request.access} / ${request.domainPolicy}.`);
     }
@@ -520,7 +569,7 @@ class WorkdaySecurityAutomator {
     this.policyCache.delete(securityGroup);
     await this.hydratePolicyCache(page, workflow, securityGroup);
     for (const request of requests) {
-      const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
+      const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs, { useCache: false });
       if (!verified) {
         throw new RpaError(`Safe mode batch verification failed for ${request.access} / ${request.domainPolicy}.`);
       }
@@ -718,6 +767,14 @@ function safeFilePart(value) {
 function redactValue(key, value) {
   if (/password|secret|token/i.test(key)) return '[redacted]';
   return value;
+}
+
+function policyAccessKey(request) {
+  return [
+    request.securityGroup,
+    request.domainPolicy,
+    request.access
+  ].map((value) => String(value || '').trim().toLowerCase()).join('|');
 }
 
 function groupRequestsBySecurityGroup(requests) {

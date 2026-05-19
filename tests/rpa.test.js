@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RpaError, formatSelector, groupRequestsBySecurityGroup, retry } = require('../src/rpa');
+const { RpaError, WorkdaySecurityAutomator, formatSelector, groupRequestsBySecurityGroup, retry } = require('../src/rpa');
 
 test('formatSelector replaces placeholders', () => {
   assert.equal(
@@ -46,4 +46,22 @@ test('groups requests by security group while preserving group order', () => {
   assert.equal(batches[0].securityGroup, 'A');
   assert.deepEqual(batches[0].requests.map((request) => request.domainPolicy), ['P1', 'P3']);
   assert.equal(batches[1].securityGroup, 'B');
+});
+
+test('replica storage validation is skipped for real Workday URLs by default', () => {
+  const automator = new WorkdaySecurityAutomator({
+    baseUrl: 'https://wd5.myworkday.com/example',
+    workflow: { replica_storage_key: 'exactWorkdayReplica' }
+  });
+
+  assert.equal(automator.shouldVerifyReplicaStorage(), false);
+});
+
+test('replica storage validation stays enabled for localhost replica runs', () => {
+  const automator = new WorkdaySecurityAutomator({
+    baseUrl: 'http://127.0.0.1:4190/',
+    workflow: { replica_storage_key: 'exactWorkdayReplica' }
+  });
+
+  assert.equal(automator.shouldVerifyReplicaStorage(), true);
 });

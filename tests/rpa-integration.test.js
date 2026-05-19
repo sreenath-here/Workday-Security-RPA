@@ -172,9 +172,69 @@ test('automator does not reopen a saved batch after post-save validation fails',
   }
 });
 
+test('automator skips duplicate policy/access rows within the same batch', { timeout: 45000 }, async () => {
+  const server = await startMockReplica();
+  const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workday-rpa-duplicate-batch-artifacts-'));
+
+  try {
+    const automator = new WorkdaySecurityAutomator(
+      {
+        baseUrl: server.url,
+        timeoutMs: 5000,
+        login: { enabled: false },
+        automation: { action_delay_ms: 0, settle_ms: 0, view_confirmation_ms: 0 },
+        workflow: {
+          task_name: 'Maintain Domain Security Policies for Security Group',
+          global_search_input: 'testid=global-search',
+          global_search_result: 'testid=task-result',
+          security_group_input: 'testid=security-group-input',
+          security_group_result: 'testid=security-group-result',
+          ok_button: 'testid=ok-button',
+          permissions_grid: "[data-testid='domain-permissions-grid'], [data-testid='view-security-group-grid']",
+          add_policy_button: 'testid=add-domain-policy',
+          access_field: 'testid=access-token',
+          access_lookup_input: 'testid=access-lookup-input',
+          access_result: "css=[data-access='{access}']",
+          domain_policy_input: 'testid=domain-policy-input',
+          domain_policy_result: 'testid=domain-policy-result',
+          save_button: 'testid=save-button'
+        }
+      },
+      { headless: true, artifactsDir, maxAttempts: 2 }
+    );
+
+    const results = await automator.run([
+      {
+        requestIndex: 0,
+        rowNumber: 2,
+        securityGroup: 'HR Admins',
+        domainPolicy: 'Worker Data Public Reports',
+        access: 'View and Modify',
+        action: 'add'
+      },
+      {
+        requestIndex: 1,
+        rowNumber: 3,
+        securityGroup: 'HR Admins',
+        domainPolicy: 'Worker Data Public Reports',
+        access: 'View and Modify',
+        action: 'add'
+      }
+    ]);
+
+    assert.deepEqual(results.map((result) => result.status), ['added', 'already_present']);
+    assert.equal(server.policyRowCount(), 1);
+    assert.equal(server.saveCount(), 1);
+    assert.equal(server.openCount(), 1);
+  } finally {
+    await server.close();
+  }
+});
+
 async function startMockReplica() {
   let saveCount = 0;
   let openCount = 0;
+  let policyRowCount = 0;
   const html = `<!doctype html>
     <html>
       <body>
@@ -225,6 +285,7 @@ async function startMockReplica() {
             const row = document.createElement('tr');
             row.innerHTML = '<td>' + selectedAccess + '</td><td>' + policy + '</td>';
             policies.appendChild(row);
+            fetch('/policy-row', { method: 'POST' });
           });
           document.querySelector('[data-testid="save-button"]').addEventListener('click', () => {
             fetch('/save', { method: 'POST' });
@@ -246,6 +307,12 @@ async function startMockReplica() {
       response.end();
       return;
     }
+    if (request.url === '/policy-row') {
+      policyRowCount += 1;
+      response.writeHead(204);
+      response.end();
+      return;
+    }
     response.writeHead(200, { 'content-type': 'text/html' });
     response.end(html);
   });
@@ -256,6 +323,7 @@ async function startMockReplica() {
     url: `http://127.0.0.1:${address.port}`,
     saveCount: () => saveCount,
     openCount: () => openCount,
+    policyRowCount: () => policyRowCount,
     close: () => new Promise((resolve) => server.close(resolve))
   };
 }
