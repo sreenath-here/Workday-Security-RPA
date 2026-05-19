@@ -179,7 +179,7 @@ Options:
   --keep-open                  Keep browser open after run for manual inspection
   --reset-replica-state        Clear localhost replica localStorage before running
   --resume                     Continue from saved state and skip completed requests
-  --safe-mode                  Re-open the group after save and verify assignment again
+  --safe-mode                  Extra in-page verification after save without reopening the group
   --no-screenshot-diff         Disable before/after grid screenshot fingerprint check
   --timeout-ms <ms>            Override selector/navigation timeout
 `);

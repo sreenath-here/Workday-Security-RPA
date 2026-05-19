@@ -72,12 +72,21 @@ class WorkdaySecurityAutomator {
       await this.loginIfNeeded(page);
 
       const results = [];
-      for (const [index, request] of requests.entries()) {
-        this.logger.info('row_start', this.logRequest(request));
-        const result = await this.processWithRetry(page, request);
-        results.push(result);
-        this.logger.info('row_finish', { ...this.logRequest(request), status: result.status, message: result.message });
-        await runOptions.onResult?.(result, request, index);
+      const batches = groupRequestsBySecurityGroup(requests);
+      this.logger.info('batches_created', { batch_count: batches.length });
+      for (const batch of batches) {
+        this.logger.info('batch_start', { security_group: batch.securityGroup, request_count: batch.requests.length });
+        const batchResults = await this.processGroupWithRetry(page, batch);
+        results.push(...batchResults);
+        for (const result of batchResults) {
+          this.logger.info('row_finish', {
+            ...this.logRequest(result.request),
+            status: result.status,
+            message: result.message
+          });
+          await runOptions.onResult?.(result, result.request, result.request.requestIndex);
+        }
+        this.logger.info('batch_finish', { security_group: batch.securityGroup, request_count: batch.requests.length });
       }
       this.logger.info('run_finish', { request_count: requests.length });
       return results;
@@ -147,6 +156,151 @@ class WorkdaySecurityAutomator {
         screenshotPath
       };
     }
+  }
+
+  async processGroupWithRetry(page, batch) {
+    try {
+      const { value, attempts } = await retry(() => this.processRequestGroup(page, batch), {
+        attempts: this.maxAttempts,
+        delayMs: this.retryDelayMs
+      });
+      return value.map((result) => ({ ...result, attempts }));
+    } catch (error) {
+      const results = [];
+      for (const request of batch.requests) {
+        const screenshotPath = await this.screenshot(page, request);
+        results.push({
+          request,
+          status: 'failed',
+          message: error.message,
+          attempts: this.maxAttempts,
+          screenshotPath
+        });
+      }
+      await this.returnHomeIfPossible(page, this.config.workflow, this.values(batch.requests[0]));
+      return results;
+    }
+  }
+
+  async processRequestGroup(page, batch) {
+    const workflow = this.config.workflow;
+    const firstRequest = batch.requests[0];
+    const values = this.values(firstRequest);
+    const results = [];
+    const requestsToAdd = [];
+
+    await this.openTask(page, workflow, values);
+    await this.fill(page, workflow, 'security_group_input', batch.securityGroup, { required: true, values });
+    await this.click(page, workflow, 'security_group_result', { required: true, values });
+    await this.click(page, workflow, 'ok_button', { required: true, values });
+    await this.hydratePolicyCache(page, workflow, batch.securityGroup);
+
+    for (const request of batch.requests) {
+      this.logger.info('row_start', this.logRequest(request));
+      if (request.action === 'verify') {
+        const found = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
+        if (!found) {
+          throw new RpaError(`Verification failed: ${request.access} / ${request.domainPolicy} is not assigned.`);
+        }
+        results.push({
+          request,
+          status: 'verified',
+          message: `${request.access} / ${request.domainPolicy} exists and passed verification.`
+        });
+        continue;
+      }
+
+      if (await this.policyAccessPresent(page, workflow, request, this.presenceCheckMs())) {
+        results.push({
+          request,
+          status: 'already_present',
+          message: `${request.access} is already assigned for this policy.`
+        });
+        continue;
+      }
+
+      requestsToAdd.push(request);
+    }
+
+    if (requestsToAdd.length === 0) {
+      await this.confirmOnViewPageThenReturnHome(page, workflow, values);
+      return results.sort((left, right) => (left.request.requestIndex ?? 0) - (right.request.requestIndex ?? 0));
+    }
+
+    const beforeFingerprint = await this.captureGridFingerprint(page, workflow, firstRequest, 'before-batch-save');
+    for (const request of requestsToAdd) {
+      await this.addPolicyRow(page, workflow, request);
+      this.addPolicyCacheEntry(batch.securityGroup, request);
+    }
+
+    await this.click(page, workflow, 'save_button', { required: true, values });
+    await this.waitForUiToSettle(page);
+    const afterFingerprint = await this.captureGridFingerprint(page, workflow, firstRequest, 'after-batch-save');
+
+    try {
+      this.assertScreenshotChangedIfNeeded(firstRequest, beforeFingerprint, afterFingerprint);
+    } catch (error) {
+      this.logger.warn('batch_screenshot_diff_warning', {
+        security_group: batch.securityGroup,
+        message: error.message
+      });
+    }
+
+    this.policyCache.delete(batch.securityGroup);
+    await this.hydratePolicyCache(page, workflow, batch.securityGroup);
+
+    for (const request of requestsToAdd) {
+      try {
+        const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
+        if (!verified) {
+          throw new RpaError(`Save completed, but ${request.access} / ${request.domainPolicy} was not detected.`);
+        }
+        await this.verifyReplicaStorageIfConfigured(page, request);
+        results.push({
+          request,
+          status: 'added',
+          message: `${request.access} added in batch, validated in policy list, and persisted in replica storage.`
+        });
+      } catch (error) {
+        results.push({
+          request,
+          status: 'failed',
+          message: `Save was submitted, but post-save validation failed: ${error.message}`
+        });
+      }
+    }
+
+    const safeModeRequests = results
+      .filter((result) => result.status === 'added' || result.status === 'verified')
+      .map((result) => result.request);
+    try {
+      await this.verifySafeModeGroupIfNeeded(page, workflow, batch.securityGroup, safeModeRequests);
+    } catch (error) {
+      this.logger.warn('safe_mode_batch_verify_warning', {
+        security_group: batch.securityGroup,
+        message: error.message
+      });
+      for (const result of results) {
+        if (result.status === 'added' || result.status === 'verified') {
+          result.status = 'failed';
+          result.message = `Save was submitted, but safe-mode validation failed: ${error.message}`;
+        }
+      }
+    }
+    await this.confirmOnViewPageThenReturnHome(page, workflow, values);
+    return results.sort((left, right) => (left.request.requestIndex ?? 0) - (right.request.requestIndex ?? 0));
+  }
+
+  async addPolicyRow(page, workflow, request) {
+    const values = this.values(request);
+    this.logger.info('add_policy_row_start', this.logRequest(request));
+    await this.click(page, workflow, 'add_policy_button', { required: true, values });
+    await this.click(page, workflow, 'access_field', { required: true, values });
+    await this.fill(page, workflow, 'access_lookup_input', request.access, { required: true, values });
+    await this.click(page, workflow, 'access_result', { required: true, values });
+    await this.fill(page, workflow, 'domain_policy_input', request.domainPolicy, { required: true, values });
+    await this.click(page, workflow, 'domain_policy_result', { required: true, values });
+    this.logger.info('add_policy_row_finish', this.logRequest(request));
   }
 
   async processRequest(page, request) {
@@ -350,19 +504,28 @@ class WorkdaySecurityAutomator {
 
   async verifySafeModeIfNeeded(page, workflow, request) {
     if (!this.safeMode) return;
-    const values = this.values(request);
     this.logger.info('safe_mode_verify_start', this.logRequest(request));
-    await this.confirmOnViewPageThenReturnHome(page, workflow, values);
-    await this.openTask(page, workflow, values);
-    await this.fill(page, workflow, 'security_group_input', request.securityGroup, { required: true, values });
-    await this.click(page, workflow, 'security_group_result', { required: true, values });
-    await this.click(page, workflow, 'ok_button', { required: true, values });
     this.policyCache.delete(request.securityGroup);
+    await this.hydratePolicyCache(page, workflow, request.securityGroup);
     const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
     if (!verified) {
-      throw new RpaError(`Safe mode re-open verification failed for ${request.access} / ${request.domainPolicy}.`);
+      throw new RpaError(`Safe mode verification failed for ${request.access} / ${request.domainPolicy}.`);
     }
     this.logger.info('safe_mode_verify_finish', this.logRequest(request));
+  }
+
+  async verifySafeModeGroupIfNeeded(page, workflow, securityGroup, requests) {
+    if (!this.safeMode || requests.length === 0) return;
+    this.logger.info('safe_mode_batch_verify_start', { security_group: securityGroup, request_count: requests.length });
+    this.policyCache.delete(securityGroup);
+    await this.hydratePolicyCache(page, workflow, securityGroup);
+    for (const request of requests) {
+      const verified = await this.policyAccessPresent(page, workflow, request, this.config.timeoutMs);
+      if (!verified) {
+        throw new RpaError(`Safe mode batch verification failed for ${request.access} / ${request.domainPolicy}.`);
+      }
+    }
+    this.logger.info('safe_mode_batch_verify_finish', { security_group: securityGroup, request_count: requests.length });
   }
 
   async hydratePolicyCache(page, workflow, securityGroup) {
@@ -557,6 +720,20 @@ function redactValue(key, value) {
   return value;
 }
 
+function groupRequestsBySecurityGroup(requests) {
+  const batchesByGroup = new Map();
+  for (const request of requests) {
+    if (!batchesByGroup.has(request.securityGroup)) {
+      batchesByGroup.set(request.securityGroup, {
+        securityGroup: request.securityGroup,
+        requests: []
+      });
+    }
+    batchesByGroup.get(request.securityGroup).requests.push(request);
+  }
+  return [...batchesByGroup.values()];
+}
+
 async function expectEnabled(locator, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -601,6 +778,7 @@ module.exports = {
   asList,
   candidateLocator,
   formatSelector,
+  groupRequestsBySecurityGroup,
   retry,
   browserArgsFor
 };

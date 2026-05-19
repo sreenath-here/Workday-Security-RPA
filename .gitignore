@@ -1,5 +1,4 @@
 .venv/
-node_modules/
 .workday-rpa-profile/
 __pycache__/
 *.py[cod]

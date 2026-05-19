@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RpaError, formatSelector, retry } = require('../src/rpa');
+const { RpaError, formatSelector, groupRequestsBySecurityGroup, retry } = require('../src/rpa');
 
 test('formatSelector replaces placeholders', () => {
   assert.equal(
@@ -31,4 +31,19 @@ test('retry raises last error', async () => {
     }, { attempts: 2, delayMs: 0 }),
     /still broken/
   );
+});
+
+test('groups requests by security group while preserving group order', () => {
+  const requests = [
+    { securityGroup: 'A', domainPolicy: 'P1' },
+    { securityGroup: 'B', domainPolicy: 'P2' },
+    { securityGroup: 'A', domainPolicy: 'P3' }
+  ];
+
+  const batches = groupRequestsBySecurityGroup(requests);
+
+  assert.equal(batches.length, 2);
+  assert.equal(batches[0].securityGroup, 'A');
+  assert.deepEqual(batches[0].requests.map((request) => request.domainPolicy), ['P1', 'P3']);
+  assert.equal(batches[1].securityGroup, 'B');
 });

@@ -1,5 +1,5 @@
 {
-  "base_url": "http://localhost:4190/",
+  "base_url": "https://wd-replica.onrender.com/",
   "timeout_ms": 45000,
   "automation": {
     "slow_mo_ms": 250,

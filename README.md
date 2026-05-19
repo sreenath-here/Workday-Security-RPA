@@ -8,7 +8,7 @@ Node.js + Playwright RPA for adding domain security policies to a security group
 - Opens the configured Workday replica URL.
 - Optionally logs in.
 - Searches/opens the configured security policy task.
-- Adds each requested domain security policy to the requested security group.
+- Groups rows by security group, adds all requested domain policies for that group in one open/save cycle, then moves to the next group.
 - Skips policies that already appear to be assigned.
 - Retries transient UI failures.
 - Captures screenshots/traces for failures.
@@ -138,7 +138,7 @@ No RPA can honestly guarantee zero errors against a changing browser UI, but thi
 - row failures do not stop the whole run;
 - UI actions wait for visible/enabled controls and include configurable human-paced delays;
 - DOM stability checks wait for network idle and configured spinner disappearance;
-- safe mode re-opens the security group after save and verifies the assignment again;
+- safe mode performs an extra post-save verification on the View Security Group page without reopening the same group;
 - before/after grid screenshots are fingerprinted to catch silent UI changes;
 - existing policies are cached per security group during a run to avoid repeated duplicate checks;
 - common interruption buttons can be dismissed through configured global handlers;
