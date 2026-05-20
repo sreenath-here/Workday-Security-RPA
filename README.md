@@ -147,7 +147,7 @@ Start-Process "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe" -
 After you are logged in on the Workday tab:
 
 ```powershell
-node .\src\cli.js --excel .\samples\request_list.xlsx --config .\configs\selectors.local.json --cdp-endpoint http://127.0.0.1:9222 --use-existing-page --existing-page-url "*myworkday*"
+node .\src\cli.js --excel .\samples\request_list.xlsx --config .\configs\selectors.local.json --headed --cdp-endpoint http://localhost:9222 --use-existing-page --existing-page-url workday
 ```
 
 If your config `base_url` is the exact Workday host you are using, `--existing-page-url` is optional; it is useful when multiple tabs are open.

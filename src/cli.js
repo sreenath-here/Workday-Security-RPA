@@ -75,6 +75,12 @@ async function main(argv = process.argv.slice(2)) {
       resetReplicaState: args.resetReplicaState,
       safeMode: args.safeMode,
       screenshotDiff: args.screenshotDiff,
+
+      
+cdpEndpoint: args.cdpEndpoint,
+  useExistingPage: args.useExistingPage,
+  existingPageUrl: args.existingPageUr,
+
       logger
     });
     const results = await automator.run(requests, {
@@ -124,6 +130,11 @@ function parseArgs(argv) {
     resume: false,
     safeMode: false,
     screenshotDiff: undefined,
+    
+cdpEndpoint: undefined,
+useExistingPage: false,
+existingPageUrl: undefined,
+
     timeoutMs: undefined,
     dryRun: false,
     headed: false,

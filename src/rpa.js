@@ -63,6 +63,13 @@ class WorkdaySecurityAutomator {
     fs.mkdirSync(this.artifactsDir, { recursive: true });
     this.logger.info('run_start', { request_count: requests.length, safe_mode: this.safeMode });
     const { context, page, shouldNavigate } = await this.newBrowserSession();
+    
+console.log("✅ ATTACHED PAGE URL:", page.url());
+console.log("✅ ATTACHED PAGE TITLE:", await page.title());
+
+// ✅ IMPORTANT: pause execution to inspect UI
+//await page.pause();
+
     context.setDefaultTimeout(this.config.timeoutMs);
     context.setDefaultNavigationTimeout(this.config.timeoutMs);
     const tracePath = path.join(this.artifactsDir, 'trace.zip');
@@ -236,9 +243,43 @@ class WorkdaySecurityAutomator {
     const duplicateRequestsByAddKey = new Map();
 
     await this.openTask(page, workflow, values);
-    await this.fill(page, workflow, 'security_group_input', batch.securityGroup, { required: true, values });
-    await this.click(page, workflow, 'security_group_result', { required: true, values });
-    await this.click(page, workflow, 'ok_button', { required: true, values });
+    const field = await this.locator(page, workflow, 'security_group_input', { required: true, values });
+
+// ✅ focus properly
+await field.click();
+await field.fill(batch.securityGroup);
+
+// ✅ select value
+await this.pause(3000);
+await field.press('Enter');
+
+await this.pause(3000);
+// ✅ wait for Workday to re-render UI
+await this.waitForUiToSettle(page);
+
+// ✅ scope strictly to toolbar
+const toolbar = page.locator("[data-automation-id='mtxToolbarContainer']");
+
+// ✅ find OK inside toolbar
+const okBtn = toolbar.locator("button[data-automation-id='wd-CommandButton_uic_okButton']");
+
+// ✅ debug
+const count = await okBtn.count();
+console.log("✅ OK button count inside toolbar:", count);
+
+await okBtn.waitFor({
+  state: 'visible',
+  timeout: this.config.timeoutMs
+});
+
+// ✅ ensure correct positioning
+await okBtn.scrollIntoViewIfNeeded();
+
+// ✅ small delay (very important for Workday re-render)
+await this.pause(500);
+
+// ✅ final click
+await okBtn.click();
     await this.hydratePolicyCache(page, workflow, batch.securityGroup);
 
     for (const request of batch.requests) {
@@ -438,7 +479,13 @@ class WorkdaySecurityAutomator {
     await this.ensureSearchAvailable(page, workflow, values);
     if (!workflow.global_search_input) return;
     await this.fill(page, workflow, 'global_search_input', workflow.task_name || '', { required: true, values });
-    await this.click(page, workflow, 'global_search_result', { required: true, values });
+
+// ✅ WAIT for dropdown results
+await this.waitFor(page, workflow, 'global_search_result', { required: true, values });
+
+// ✅ THEN CLICK
+await this.click(page, workflow, 'global_search_result', { required: true, values });
+
   }
 
   async ensureSearchAvailable(page, workflow, values) {

@@ -1,5 +1,5 @@
 {
-  "base_url": "https://wd-replica.onrender.com/",
+  "base_url": "https://impl.wd12.myworkday.com/ust_dpt1/d/home.htmld",
   "timeout_ms": 45000,
   "automation": {
     "slow_mo_ms": 250,
@@ -22,11 +22,27 @@
   "workflow": {
     "task_name": "Maintain Permissions for Security Group",
     "replica_storage_key": "exactWorkdayReplica",
-    "global_search_input": "testid=global-search",
-    "global_search_result": "testid=search-maintain-task",
-    "security_group_input": "testid=source-security-group",
-    "security_group_result": "css=[data-action='choose-source'][data-group='{security_group}']",
-    "ok_button": "testid=prompt-ok",
+    "global_search_input": [
+  "role=combobox[name=\"Search Workday\"]"
+],
+
+
+"global_search_result": [
+  "css=li[role='option'][data-automation-id='searchInputAutoCompleteResult']:has-text(\"Maintain Permissions for Security Group\")"
+],
+
+    
+"security_group_input": [
+  "role=textbox[name=\"Source Security Group\"]"
+],
+
+"security_group_result": [
+  "text={security_group}"
+],
+
+"ok_button": [
+  "css=[data-automation-id='mtxToolbarContainer'] button[data-automation-id='wd-CommandButton_uic_okButton']"
+],
     "permissions_grid": "[data-testid='domain-permissions-grid'], [data-testid='view-security-group-grid']",
     "add_policy_button": "css=[data-action='add-row']",
     "access_field": "testid=access-token",
