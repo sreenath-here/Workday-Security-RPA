@@ -10,6 +10,9 @@
     "retry_delay_ms": 3000,
     "max_attempts": 5,
     "user_data_dir": ".workday-rpa-profile",
+    "cdp_endpoint": "",
+    "use_existing_page": false,
+    "existing_page_url": "",
     "safe_mode": false,
     "screenshot_diff_enabled": true
   },

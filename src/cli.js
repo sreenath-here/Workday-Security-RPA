@@ -68,6 +68,9 @@ async function main(argv = process.argv.slice(2)) {
       retryDelayMs: args.retryDelayMs,
       viewConfirmationMs: args.viewConfirmationMs,
       userDataDir: args.userDataDir,
+      cdpEndpoint: args.cdpEndpoint,
+      useExistingPage: args.useExistingPage,
+      existingPageUrl: args.existingPageUrl,
       keepOpen: args.keepOpen,
       resetReplicaState: args.resetReplicaState,
       safeMode: args.safeMode,
@@ -111,6 +114,9 @@ function parseArgs(argv) {
     retryDelayMs: undefined,
     viewConfirmationMs: undefined,
     userDataDir: undefined,
+    cdpEndpoint: undefined,
+    useExistingPage: false,
+    existingPageUrl: undefined,
     stateFile: undefined,
     logFile: undefined,
     keepOpen: false,
@@ -141,6 +147,9 @@ function parseArgs(argv) {
     else if (arg === '--retry-delay') args.retryDelayMs = next();
     else if (arg === '--view-confirmation-ms') args.viewConfirmationMs = next();
     else if (arg === '--user-data-dir') args.userDataDir = next();
+    else if (arg === '--cdp-endpoint') args.cdpEndpoint = next();
+    else if (arg === '--use-existing-page') args.useExistingPage = true;
+    else if (arg === '--existing-page-url') args.existingPageUrl = next();
     else if (arg === '--state-file') args.stateFile = next();
     else if (arg === '--log-file') args.logFile = next();
     else if (arg === '--keep-open') args.keepOpen = true;
@@ -174,6 +183,9 @@ Options:
   --retry-delay <ms>           Base delay between row retries
   --view-confirmation-ms <ms>  Pause on View Security Group page after validation
   --user-data-dir <path>       Persistent browser profile for replica localStorage
+  --cdp-endpoint <url>         Attach to an already-running Chrome/Edge remote debugging endpoint
+  --use-existing-page          Use an already-open tab from the attached browser instead of opening a new tab
+  --existing-page-url <match>  Prefer an existing tab URL containing this text, wildcard, or /regex/
   --state-file <path>          Resume state path. Default: artifacts/run-state.json
   --log-file <path>            JSONL log path. Default: artifacts/run.jsonl
   --keep-open                  Keep browser open after run for manual inspection

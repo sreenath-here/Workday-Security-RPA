@@ -128,6 +128,30 @@ Production-style safe mode:
 node .\src\cli.js --excel .\samples\request_list.xlsx --config .\configs\selectors.local.json --headed --safe-mode --resume
 ```
 
+Run on an already-open Workday tab:
+
+Playwright can attach to an existing tab only when Chrome or Edge was started with a remote debugging port. Start a dedicated browser window first, log in to Workday there, complete any proxy/MFA steps, keep the Workday tab open, then run the automation against that tab.
+
+Chrome:
+
+```powershell
+Start-Process "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" -ArgumentList "--remote-debugging-port=9222 --user-data-dir=$env:TEMP\workday-rpa-cdp"
+```
+
+Edge:
+
+```powershell
+Start-Process "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe" -ArgumentList "--remote-debugging-port=9222 --user-data-dir=$env:TEMP\workday-rpa-cdp"
+```
+
+After you are logged in on the Workday tab:
+
+```powershell
+node .\src\cli.js --excel .\samples\request_list.xlsx --config .\configs\selectors.local.json --cdp-endpoint http://127.0.0.1:9222 --use-existing-page --existing-page-url "*myworkday*"
+```
+
+If your config `base_url` is the exact Workday host you are using, `--existing-page-url` is optional; it is useful when multiple tabs are open.
+
 ## Reliability Notes
 
 No RPA can honestly guarantee zero errors against a changing browser UI, but this tool is structured for production-style reliability:

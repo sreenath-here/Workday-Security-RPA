@@ -1,6 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { RpaError, WorkdaySecurityAutomator, formatSelector, groupRequestsBySecurityGroup, retry } = require('../src/rpa');
+const { parseArgs } = require('../src/cli');
+const {
+  RpaError,
+  WorkdaySecurityAutomator,
+  formatSelector,
+  groupRequestsBySecurityGroup,
+  retry,
+  selectExistingPage
+} = require('../src/rpa');
 
 test('formatSelector replaces placeholders', () => {
   assert.equal(
@@ -64,4 +72,49 @@ test('replica storage validation stays enabled for localhost replica runs', () =
   });
 
   assert.equal(automator.shouldVerifyReplicaStorage(), true);
+});
+
+test('selects existing tab matching base URL before other open tabs', () => {
+  const pages = [
+    fakePage('https://example.com/home'),
+    fakePage('https://wd5.myworkday.com/example/d/home.htmld')
+  ];
+
+  const page = selectExistingPage(pages, { baseUrl: 'https://wd5.myworkday.com/example' });
+
+  assert.equal(page.url(), 'https://wd5.myworkday.com/example/d/home.htmld');
+});
+
+test('selects existing tab by wildcard URL pattern', () => {
+  const pages = [
+    fakePage('https://wd5.myworkday.com/example/d/home.htmld'),
+    fakePage('https://wd5.myworkday.com/example/security/task')
+  ];
+
+  const page = selectExistingPage(pages, {
+    baseUrl: 'https://wd5.myworkday.com/example',
+    urlPattern: '*security*'
+  });
+
+  assert.equal(page.url(), 'https://wd5.myworkday.com/example/security/task');
+});
+
+function fakePage(url) {
+  return { url: () => url };
+}
+
+test('parses existing browser attach options', () => {
+  const args = parseArgs([
+    '--excel',
+    'requests.xlsx',
+    '--cdp-endpoint',
+    'http://127.0.0.1:9222',
+    '--use-existing-page',
+    '--existing-page-url',
+    '*myworkday*'
+  ]);
+
+  assert.equal(args.cdpEndpoint, 'http://127.0.0.1:9222');
+  assert.equal(args.useExistingPage, true);
+  assert.equal(args.existingPageUrl, '*myworkday*');
 });

@@ -50,23 +50,28 @@ class WorkdaySecurityAutomator {
     this.resetReplicaState = options.resetReplicaState ?? false;
     this.safeMode = options.safeMode ?? Boolean(automation.safe_mode);
     this.screenshotDiffEnabled = options.screenshotDiff ?? automation.screenshot_diff_enabled !== false;
+    this.cdpEndpoint = options.cdpEndpoint || automation.cdp_endpoint || '';
+    this.useExistingPage = options.useExistingPage ?? Boolean(automation.use_existing_page);
+    this.existingPageUrl = options.existingPageUrl || automation.existing_page_url || '';
     this.logger = options.logger || new JsonLogger();
     this.policyCache = new Map();
     this.browser = undefined;
+    this.attachedToExistingBrowser = false;
   }
 
   async run(requests, runOptions = {}) {
     fs.mkdirSync(this.artifactsDir, { recursive: true });
     this.logger.info('run_start', { request_count: requests.length, safe_mode: this.safeMode });
-    const context = await this.newBrowserContext();
+    const { context, page, shouldNavigate } = await this.newBrowserSession();
     context.setDefaultTimeout(this.config.timeoutMs);
     context.setDefaultNavigationTimeout(this.config.timeoutMs);
     const tracePath = path.join(this.artifactsDir, 'trace.zip');
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-    const page = await context.newPage();
 
     try {
-      await page.goto(this.config.baseUrl, { waitUntil: 'domcontentloaded', timeout: this.config.timeoutMs });
+      if (shouldNavigate) {
+        await page.goto(this.config.baseUrl, { waitUntil: 'domcontentloaded', timeout: this.config.timeoutMs });
+      }
       await this.resetReplicaStorageIfRequested(page);
       await this.waitForUiToSettle(page);
       await this.loginIfNeeded(page);
@@ -91,7 +96,9 @@ class WorkdaySecurityAutomator {
       this.logger.info('run_finish', { request_count: requests.length });
       return results;
     } finally {
-      if (this.keepOpen) {
+      if (this.attachedToExistingBrowser) {
+        await stopTrace(context, tracePath);
+      } else if (this.keepOpen) {
         await stopTrace(context, tracePath);
         console.log('Browser kept open for inspection. Close the browser window or press Ctrl+C when finished.');
         await waitUntilContextCloses(context);
@@ -101,6 +108,43 @@ class WorkdaySecurityAutomator {
         await this.browser?.close().catch(() => {});
       }
     }
+  }
+
+  async newBrowserSession() {
+    if (this.cdpEndpoint) {
+      this.attachedToExistingBrowser = true;
+      const browser = await chromium.connectOverCDP(this.cdpEndpoint);
+      this.browser = browser;
+      const context = browser.contexts()[0] || await browser.newContext();
+      const page = this.useExistingPage
+        ? await this.findExistingPage(context)
+        : await context.newPage();
+      const shouldNavigate = !this.useExistingPage || isBlankPage(page);
+      this.logger.info('browser_attached', {
+        cdp_endpoint: this.cdpEndpoint,
+        use_existing_page: this.useExistingPage,
+        page_url: page.url(),
+        should_navigate: shouldNavigate
+      });
+      return { context, page, shouldNavigate };
+    }
+
+    const context = await this.newBrowserContext();
+    const page = await context.newPage();
+    return { context, page, shouldNavigate: true };
+  }
+
+  async findExistingPage(context) {
+    await waitForAtLeastOnePage(context, this.config.timeoutMs);
+    const pages = context.pages();
+    const page = selectExistingPage(pages, {
+      baseUrl: this.config.baseUrl,
+      urlPattern: this.existingPageUrl
+    });
+    if (page) return page;
+
+    const details = pages.map((candidate) => candidate.url()).join(', ') || 'none';
+    throw new RpaError(`No existing browser tab matched the requested page. Open Workday in the browser attached at ${this.cdpEndpoint}, or pass --existing-page-url. Current tabs: ${details}`);
   }
 
   async newBrowserContext() {
@@ -753,6 +797,56 @@ function browserArgsFor(baseUrl) {
   }
 }
 
+function selectExistingPage(pages, { baseUrl, urlPattern } = {}) {
+  const openPages = pages.filter((page) => !isBlankPage(page));
+  if (urlPattern) {
+    const matcher = pageUrlMatcher(urlPattern);
+    const matched = openPages.find((page) => matcher(page.url()));
+    if (matched) return matched;
+  }
+
+  const baseHost = hostnameFor(baseUrl);
+  if (baseHost) {
+    const matched = openPages.find((page) => {
+      const pageHost = hostnameFor(page.url());
+      return pageHost === baseHost || pageHost.endsWith(`.${baseHost}`) || baseHost.endsWith(`.${pageHost}`);
+    });
+    if (matched) return matched;
+  }
+
+  return openPages[0] || pages[0];
+}
+
+function pageUrlMatcher(pattern) {
+  if (pattern.startsWith('/') && pattern.endsWith('/') && pattern.length > 2) {
+    const regex = new RegExp(pattern.slice(1, -1));
+    return (url) => regex.test(url);
+  }
+
+  if (pattern.includes('*')) {
+    const escaped = pattern
+      .split('*')
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*');
+    const regex = new RegExp(`^${escaped}$`);
+    return (url) => regex.test(url);
+  }
+
+  return (url) => url.includes(pattern);
+}
+
+function hostnameFor(url) {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isBlankPage(page) {
+  return page.url() === 'about:blank';
+}
+
 function numberOption(...values) {
   for (const value of values) {
     if (value !== undefined && value !== null && value !== '') return Number(value);
@@ -824,6 +918,11 @@ async function waitUntilContextCloses(context) {
   await Promise.race(pages.map((page) => page.waitForEvent('close').catch(() => {})));
 }
 
+async function waitForAtLeastOnePage(context, timeoutMs) {
+  if (context.pages().length > 0) return;
+  await context.waitForEvent('page', { timeout: timeoutMs });
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -836,6 +935,7 @@ module.exports = {
   candidateLocator,
   formatSelector,
   groupRequestsBySecurityGroup,
+  selectExistingPage,
   retry,
   browserArgsFor
 };
